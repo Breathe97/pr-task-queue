@@ -1,7 +1,7 @@
 export class PrTaskQueue<T extends string> {
   #conditionMap = new Map<T, boolean>() // 条件
 
-  #tasks: Array<{ key: string; func: Function; conditionKeys: T[]; describe: string }> = [] // 待执行函数
+  #tasks: Array<{ key: string; strict: boolean; func: Function; conditionKeys: T[]; describe: string }> = [] // 待执行函数
 
   index // 任务 index
 
@@ -34,12 +34,14 @@ export class PrTaskQueue<T extends string> {
    * 添加待执行任务
    * @param func 待执行任务
    * @param conditionKeys 依赖条件 （所有条件符合时才执行该任务）
-   * @param describe 描述信息
+   * @param options.key 任务唯一键
+   * @param options.strict 是否为严格任务 （任务执行后不会主动从队列移除 需要手动调用 clear 进行移除）
+   * @param options.describe 描述信息
    */
-  addTask = (func: Function, conditionKeys: T[], options: { key?: string; describe?: string } = {}) => {
-    const _options = { key: '', describe: '', ...options }
+  addTask = (func: Function, conditionKeys: T[], options: { key?: string; strict?: boolean; describe?: string } = {}) => {
+    const _options = { key: '', strict: false, describe: '', ...options }
 
-    let { key, describe } = _options
+    let { key, strict, describe } = _options
     if (!key) {
       key = `${this.index++}`
     } else {
@@ -48,7 +50,7 @@ export class PrTaskQueue<T extends string> {
 
     // 添加当前任务
     {
-      const task = { key, func, conditionKeys, describe }
+      const task = { key, func, conditionKeys, describe, strict }
       this.#tasks.unshift(task)
     }
     this.#checkExecute() // 检查和任务队列中可执行任务
@@ -95,9 +97,9 @@ export class PrTaskQueue<T extends string> {
 
   /**
    * 检查是否符合条件
-   * @param conditionKeys
+   * @param conditionKeys 依赖条件 string[]
    */
-  #checkCondition = (conditionKeys: T[]) => {
+  checkConditions = (conditionKeys: T[]) => {
     let accord = true // 默认符合
     for (const conditionKey of conditionKeys) {
       const _accord = this.#conditionMap.get(conditionKey)
@@ -118,12 +120,16 @@ export class PrTaskQueue<T extends string> {
     for (let i = length; i > 0; i--) {
       const index = i - 1
       const item = this.#tasks[index]
-      const { conditionKeys, func } = item
-      const accord = this.#checkCondition(conditionKeys)
-      // 符合条件 执行函数并移除函数记录
-      if (accord) {
-        func()
-        this.#tasks.splice(index, 1)
+      const { conditionKeys, func, strict } = item
+      const accord = this.checkConditions(conditionKeys)
+      {
+        if (!accord) return // 不符合条件 不执行
+        func() // 执行函数
+      }
+
+      {
+        if (strict) return // 严格任务 不自动移除队列
+        this.#tasks.splice(index, 1) // 移除函数记录
       }
     }
   }
