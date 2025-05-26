@@ -53,7 +53,10 @@ export class PrTaskQueue<T extends string> {
       const task = { key, func, conditionKeys, describe, strict }
       this.#tasks.unshift(task)
     }
+
     this.#checkExecute() // 检查和任务队列中可执行任务
+
+    return key
   }
 
   /**
