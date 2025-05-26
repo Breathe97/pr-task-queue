@@ -118,7 +118,7 @@ export class PrTaskQueue<T extends string> {
   /**
    * 检查所有函数并执行
    */
-  #checkExecute = async () => {
+  #checkExecute = () => {
     const length = this.#tasks.length
     for (let i = length; i > 0; i--) {
       const index = i - 1
@@ -127,7 +127,7 @@ export class PrTaskQueue<T extends string> {
       const accord = this.checkConditions(conditionKeys)
       {
         if (!accord) return // 不符合条件 不执行
-        await func() // 执行函数
+        func() // 执行函数
       }
 
       {
