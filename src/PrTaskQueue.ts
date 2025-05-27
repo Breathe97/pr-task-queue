@@ -12,9 +12,9 @@ export class PrTaskQueue<T extends string> {
    */
   constructor(conditionKeys: T[]) {
     this.index = 0
-    // 设置所有条件为false
+    // 设置所有条件为 true
     for (const conditionKey of conditionKeys) {
-      this.#conditionMap.set(conditionKey, false)
+      this.#conditionMap.set(conditionKey, true)
     }
   }
 
@@ -25,6 +25,8 @@ export class PrTaskQueue<T extends string> {
    */
   setCondition = (conditionKey: T, accord: boolean) => {
     this.#conditionMap.set(conditionKey, accord)
+
+    // 每次条件变为true 都可能有以满足条件的任务 需要遍历一次进行执行
     if (accord) {
       this.#checkExecute()
     }
@@ -48,13 +50,17 @@ export class PrTaskQueue<T extends string> {
       this.clear([key]) // 如果是自定义key 则需要查询是否已存在 并删除该任务
     }
 
-    // 添加当前任务
-    {
+    // 检查该任务是否可以执行
+    const accord = this.checkConditions(conditionKeys)
+    if (accord) {
+      func()
+    }
+
+    // 如果是严格任务 即便是执行也添加到队列中 以便再次执行
+    if (strict) {
       const task = { key, func, conditionKeys, describe, strict }
       this.#tasks.unshift(task)
     }
-
-    this.#checkExecute() // 检查和任务队列中可执行任务
 
     return key
   }
