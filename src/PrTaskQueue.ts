@@ -57,9 +57,9 @@ export class PrTaskQueue<T extends string> {
 
     // 符合条件
     if (accord) {
-      func()
+      func() // 执行函数
       // 非严格模式
-      if (!strict) {
+      if (strict === false) {
         this.clear([key])
       }
     }
@@ -133,14 +133,14 @@ export class PrTaskQueue<T extends string> {
       const item = this.#tasks[index]
       const { conditionKeys, func, strict } = item
       const accord = this.checkConditions(conditionKeys)
-      {
-        if (!accord) return // 不符合条件 不执行
-        func() // 执行函数
-      }
 
-      {
-        if (strict) return // 严格任务 不自动移除队列
-        this.#tasks.splice(index, 1) // 移除函数记录
+      // 符合条件
+      if (accord) {
+        func() // 执行函数
+        // 非严格任务
+        if (strict === false) {
+          this.#tasks.splice(index, 1) // 移除函数记录
+        }
       }
     }
   }
