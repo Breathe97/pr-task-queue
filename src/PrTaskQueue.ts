@@ -66,6 +66,18 @@ interface CreateTask<T> {
    * 任务函数
    */
   func: () => Promise<unknown>
+  /**
+   * 任务完成
+   */
+  success?: (_e: any) => void
+  /**
+   * 任务失败
+   */
+  fail?: (_e: any) => void
+  /**
+   * 任务结束
+   */
+  complete?: () => void
 }
 
 export class PrTaskQueue<T extends string> {
@@ -74,6 +86,8 @@ export class PrTaskQueue<T extends string> {
   #tasks = new Map<String, Task<T>>() // 任务队列
 
   #index = 0 // 任务 index 用于生成任务key
+
+  #executing_tasks = new Map<String, Task<T>>() // 正在执行的任务
 
   /**
    * 初始化条件
@@ -92,16 +106,18 @@ export class PrTaskQueue<T extends string> {
    * @param conditionKey 条件名
    * @param accord 条件状态
    */
-  setCondition = (conditionKey: T, accord: boolean) => {
+  setCondition = async (conditionKey: T, accord: boolean) => {
     const had = this.#conditionMap.has(conditionKey)
     if (!had) {
       throw new Error('You have set an incorrect condition. If this is necessary, you need to define it first during instantiation.')
     }
-    console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: setCondition`, accord)
+
+    // console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: setCondition:${conditionKey}`, accord)
+
     this.#conditionMap.set(conditionKey, accord)
     // 每次条件变为true 都可能有以满足条件的任务 需要检查执行对应任务
     if (accord) {
-      this.executeTasks()
+      await this.executeTasks()
     }
   }
 
@@ -112,9 +128,17 @@ export class PrTaskQueue<T extends string> {
    * @param options.func 任务函数
    */
   createTask = async (options: CreateTask<T>) => {
-    const _options = { describe: '', strict: false, timeout: 0, ...options }
+    const _options = {
+      describe: '',
+      strict: false,
+      timeout: 0,
+      success: (_e: any) => {},
+      fail: (_e: any) => {},
+      complete: () => {},
+      ...options
+    }
 
-    const { describe, strict, timeout, conditionKeys, func } = _options
+    const { describe, strict, timeout, conditionKeys, func, success, fail, complete } = _options
 
     const key = `${this.#index++}` // 任务唯一key
 
@@ -135,55 +159,47 @@ export class PrTaskQueue<T extends string> {
 
     let timer = 0
 
-    // 创建成功的回调
-    const success = (_e: any) => {}
-
-    // 创建失败的回调
-    const fail = (_e: any) => {}
-
-    // 创建完成的回调
-    const complete = () => {}
-
     // 创建执行函数
     const exe = async () => {
-      // 该任务已被删除
-      if (!this.#tasks.get(key)) throw new Error('This task has already been executed and cannot be executed again. Or try setting the task to strict mode.')
+      //  该任务已被删除 该任务正在执行 则跳过
+      if (!this.#tasks.get(key) || this.#executing_tasks.get(key)) return
 
-      const isAccord = task.checkAccord()
-
-      // console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: exe func: ${key}(${describe})`, isAccord)
+      const isAccord = task.checkAccord() // 是否可以执行
 
       if (!isAccord) return // 不符合条件
+
+      // console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: exe ${describe}`)
+
+      this.#executing_tasks.set(key, task) // 记录当前正在执行的任务
 
       // 执行函数
       const task_promise = task.func()
 
-      const timeout_promise = new Promise((res, rej) => {
+      const timeout_promise = new Promise((_res, rej) => {
         // 如果有超时时间
         if (timeout) {
           timer = setTimeout(() => {
             rej(`task: ${key} (${describe}) is timeout.`)
           }, timeout)
-        } else {
-          res(true)
         }
       })
 
       // 使用 race 当超时后终止任务的进行
-      Promise.race([task_promise, timeout_promise])
-        .then((e) => {
-          task.success(e)
+      await Promise.race([task_promise, timeout_promise])
+        .then(async (e) => {
+          success(e)
         })
-        .catch((e) => {
-          task.fail(e)
+        .catch(async (e) => {
+          fail(e)
         })
-        .finally(() => {
+        .finally(async () => {
+          this.#executing_tasks.delete(task.key) // 移除正在执行的状态
           // 非严格模式自动移除该任务
           if (task.strict === false) {
             this.#tasks.delete(task.key) // 移除任务
           }
           clearTimeout(timer) // 移除超时计时器
-          task.complete()
+          complete()
         })
     }
 

@@ -6,6 +6,8 @@
 
 import { PrTaskQueue } from '../../src/PrTaskQueue'
 const taskQueue = new PrTaskQueue(['a', 'b', 'c'])
+// @ts-ignore
+window.taskQueue = taskQueue
 taskQueue.setCondition('a', false)
 taskQueue.setCondition('b', false)
 taskQueue.setCondition('c', false)
@@ -25,23 +27,20 @@ const task = await taskQueue.createTask({
         rej({ state: false })
       }
     })
+  },
+  success: (e) => {
+    console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: success`, e)
+    taskQueue.clear([task.key])
+  },
+  fail: async (e) => {
+    console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: fail`, e)
+    await new Promise((resolve) => setTimeout(() => resolve(true), 1000))
+    await task.exe() // 再次执行该任务 只有启用 strict=true 时 才能再次调用 task.exe()
+  },
+  complete: () => {
+    console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: complete`)
   }
 })
-
-task.success = (e) => {
-  console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: success`, e)
-  taskQueue.clear([task.key])
-}
-
-task.fail = async (e) => {
-  console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: fail`, e)
-  await new Promise((resolve) => setTimeout(() => resolve(true), 1000))
-  await task.exe() // 再次执行该任务 只有启用 strict=true 时 才能再次调用 task.exe()
-}
-
-task.complete = () => {
-  console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: complete`)
-}
 
 setInterval(() => {
   const random = Math.random()
