@@ -1,40 +1,10 @@
-js 函数的任务队列管理。
+// import { createApp } from 'vue'
+// import './style.css'
+// import App from './App.vue'
 
-- 支持任意函数添加至队列。
-- 添加后由外部管理任务消费状态：消费成功-移除 消费失败-重试/移除
+// createApp(App).mount('#app')
 
-## 立即开始
-
-### 安装
-
-```bash
-npm i pr-task-queue
-```
-
-### 引入
-
-```js
-// 按需引入
-
-// 或全量引入
-import { PrTaskQueue } from 'pr-task-queue'
-```
-
-#### 创建队列
-
-```js
-const taskQueue = new PrTaskQueue(['login', 'isAdmin']) // 创建一个队列 队列中含有 是否登录 是否为管理员
-```
-
-#### 设置条件
-
-```js
-taskQueue.setCondition('login', true) // 已登录
-```
-
-#### 示例
-
-```js
+import { PrTaskQueue } from '../../src/PrTaskQueue'
 const taskQueue = new PrTaskQueue(['a', 'b', 'c'])
 taskQueue.setCondition('a', false)
 taskQueue.setCondition('b', false)
@@ -77,27 +47,3 @@ setInterval(() => {
   const random = Math.random()
   taskQueue.setCondition('a', random >= 0.5)
 }, 5000)
-```
-
-#### 清理任务
-
-```js
-taskQueue.clear(['taskKey']) // 清理指定任务
-taskQueue.clear() // 清理所有任务
-```
-
-#### 查询所有条件当前状态
-
-- 一般用不上 当任务没有安装预期执行可调用查看
-
-```js
-const res = taskQueue.getConditions()
-```
-
-#### 查询所有待执行任务
-
-- 一般用不上 当任务没有安装预期执行可调用查看
-
-```js
-const res = taskQueue.getTasks()
-```

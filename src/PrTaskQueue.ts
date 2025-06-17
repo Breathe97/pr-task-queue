@@ -1,9 +1,79 @@
+interface Task<T> {
+  /**
+   * 任务唯一标识
+   */
+  key: string
+  /**
+   * 任务描述
+   */
+  describe: string
+  /**
+   * 严格模式
+   * @description 如果开启 则不自动清除该任务 需要由外部调用 taskQueue.clear([task.key]) 来清除
+   * @description 如果关闭 则无论任务执行的结果 只要该任务符合并且执行过一次则自动销毁
+   */
+  strict: boolean
+  /**
+   * 任务执行条件 (当所有条件均为true时 该任务才执行)
+   */
+  conditionKeys: T[]
+  /**
+   * 任务函数
+   */
+  func: () => Promise<unknown>
+  /**
+   * 当前任务是否符合执行条件
+   */
+  checkAccord: () => boolean
+  /**
+   * 任务完成
+   */
+  success: (_e: any) => void
+  /**
+   * 任务失败
+   */
+  fail: (_e: any) => void
+  /**
+   * 任务结束
+   */
+  complete: () => void
+  /**
+   * 执行任务
+   */
+  exe: () => Promise<void>
+}
+
+interface CreateTask<T> {
+  /**
+   * 任务描述
+   */
+  describe?: string
+  /**
+   * 严格模式
+   * @description 如果开启 则不自动清除该任务 需要由外部调用 taskQueue.clear([task.key]) 来清除
+   * @description 如果关闭 则无论任务执行的结果 只要该任务符合并且执行过一次则自动销毁
+   */
+  strict?: boolean
+  /**
+   * 任务超时时间(ms) 任务超时也属于任务执行结果
+   */
+  timeout?: number
+  /**
+   * 任务执行条件 (当所有条件均为true时 该任务才执行)
+   */
+  conditionKeys: T[]
+  /**
+   * 任务函数
+   */
+  func: () => Promise<unknown>
+}
+
 export class PrTaskQueue<T extends string> {
   #conditionMap = new Map<T, boolean>() // 条件
 
-  #tasks: Array<{ key: string; strict: boolean; func: Function; conditionKeys: T[]; describe: string }> = [] // 待执行函数
+  #tasks = new Map<String, Task<T>>() // 任务队列
 
-  index // 任务 index
+  #index = 0 // 任务 index 用于生成任务key
 
   /**
    * 初始化条件
@@ -11,7 +81,6 @@ export class PrTaskQueue<T extends string> {
    * @param conditionKeys 条件keys string[]
    */
   constructor(conditionKeys: T[]) {
-    this.index = 0
     // 设置所有条件为 true
     for (const conditionKey of conditionKeys) {
       this.#conditionMap.set(conditionKey, true)
@@ -24,47 +93,118 @@ export class PrTaskQueue<T extends string> {
    * @param accord 条件状态
    */
   setCondition = (conditionKey: T, accord: boolean) => {
+    const had = this.#conditionMap.has(conditionKey)
+    if (!had) {
+      throw new Error('You have set an incorrect condition. If this is necessary, you need to define it first during instantiation.')
+    }
+    console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: setCondition`, accord)
     this.#conditionMap.set(conditionKey, accord)
-    // 每次条件变为true 都可能有以满足条件的任务 需要遍历一次进行执行
+    // 每次条件变为true 都可能有以满足条件的任务 需要检查执行对应任务
     if (accord) {
-      this.#checkExecute()
+      this.executeTasks()
     }
   }
 
   /**
-   * 添加待执行任务
-   * @param func 待执行任务
-   * @param conditionKeys 依赖条件 （所有条件符合时才执行该任务）
-   * @param options.key 任务唯一键
-   * @param options.strict 是否为严格任务 （任务执行后不会主动从队列移除 需要手动调用 clear 进行移除）
+   * 创建任务
    * @param options.describe 描述信息
+   * @param options.conditionKeys 执行条件 （所有条件符合时才执行该任务）
+   * @param options.func 任务函数
    */
-  addTask = (func: Function, conditionKeys: T[], options: { key?: string; strict?: boolean; describe?: string } = {}) => {
-    const _options = { key: '', strict: false, describe: '', ...options }
+  createTask = async (options: CreateTask<T>) => {
+    const _options = { describe: '', strict: false, timeout: 0, ...options }
 
-    let { key, strict, describe } = _options
-    if (!key) {
-      key = `${this.index++}`
-    } else {
-      this.clear([key]) // 如果是自定义key 则需要查询是否已存在 并删除该任务
-    }
+    const { describe, strict, timeout, conditionKeys, func } = _options
 
-    const task = { key, func, conditionKeys, describe, strict }
-    this.#tasks.unshift(task)
+    const key = `${this.#index++}` // 任务唯一key
 
-    // 检查该任务是否可以执行
-    const accord = this.checkConditions(conditionKeys)
+    // 检查条件
+    const checkAccord = () => {
+      let accord = true // 默认符合条件
 
-    // 符合条件
-    if (accord) {
-      func() // 执行函数
-      // 非严格模式
-      if (strict === false) {
-        this.clear([key])
+      for (const conditionKey of conditionKeys) {
+        // 只要有一项条件不符合 则直接跳出循环
+        if (!this.#conditionMap.get(conditionKey)) {
+          accord = false
+          break
+        }
       }
+
+      return accord
     }
 
-    return key
+    let timer = 0
+
+    // 创建成功的回调
+    const success = (_e: any) => {}
+
+    // 创建失败的回调
+    const fail = (_e: any) => {}
+
+    // 创建完成的回调
+    const complete = () => {}
+
+    // 创建执行函数
+    const exe = async () => {
+      // 该任务已被删除
+      if (!this.#tasks.get(key)) throw new Error('This task has already been executed and cannot be executed again. Or try setting the task to strict mode.')
+
+      const isAccord = task.checkAccord()
+
+      // console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: exe func: ${key}(${describe})`, isAccord)
+
+      if (!isAccord) return // 不符合条件
+
+      // 执行函数
+      const task_promise = task.func()
+
+      const timeout_promise = new Promise((res, rej) => {
+        // 如果有超时时间
+        if (timeout) {
+          timer = setTimeout(() => {
+            rej(`task: ${key} (${describe}) is timeout.`)
+          }, timeout)
+        } else {
+          res(true)
+        }
+      })
+
+      // 使用 race 当超时后终止任务的进行
+      Promise.race([task_promise, timeout_promise])
+        .then((e) => {
+          task.success(e)
+        })
+        .catch((e) => {
+          task.fail(e)
+        })
+        .finally(() => {
+          // 非严格模式自动移除该任务
+          if (task.strict === false) {
+            this.#tasks.delete(task.key) // 移除任务
+          }
+          clearTimeout(timer) // 移除超时计时器
+          task.complete()
+        })
+    }
+
+    const task = { key, describe, strict, conditionKeys, func, checkAccord, success, fail, complete, exe }
+
+    this.#tasks.set(key, task) // 添加到队列
+
+    // 尝试执行当前任务
+    await exe()
+
+    return task
+  }
+
+  /**
+   * 尝试执行任务
+   */
+  executeTasks = async () => {
+    const tasks = [...this.#tasks.values()]
+    for (const task of tasks) {
+      await task.exe() // 执行时自动判断是否符合条件
+    }
   }
 
   /**
@@ -72,76 +212,22 @@ export class PrTaskQueue<T extends string> {
    * @param taskKey 任务keys
    */
   clear = (taskKeys: string[] = []) => {
-    // 删除所有
     if (taskKeys.length === 0) {
-      this.#tasks = []
+      this.#tasks = new Map()
       return
     }
-
     for (const taskKey of taskKeys) {
-      const index = this.#tasks.findIndex((item) => item.key === taskKey)
-      if (index !== -1) {
-        this.#tasks.splice(index, 1) // 移除改任务
-      }
+      this.#tasks.delete(taskKey)
     }
   }
 
   /**
    * 查询所有条件当前状态
    */
-  getConditions = () => {
-    const obj = Object.fromEntries(this.#conditionMap)
-    return obj
-  }
+  getConditions = () => Object.fromEntries(this.#conditionMap)
 
   /**
    * 查询所有待执行任务
    */
-  getTasks = () => {
-    const arr = []
-    for (const task of this.#tasks) {
-      const { key, describe, conditionKeys } = task
-      arr.push({ key, describe, conditionKeys })
-    }
-    return arr
-  }
-
-  /**
-   * 检查是否符合条件
-   * @param conditionKeys 依赖条件 string[]
-   */
-  checkConditions = (conditionKeys: T[]) => {
-    let accord = true // 默认符合
-    for (const conditionKey of conditionKeys) {
-      const _accord = this.#conditionMap.get(conditionKey)
-      // 只有有一个条件不符合 直接跳出判断不符合
-      if (_accord === false) {
-        accord = false
-        break
-      }
-    }
-    return accord
-  }
-
-  /**
-   * 检查所有函数并执行
-   */
-  #checkExecute = () => {
-    const length = this.#tasks.length
-    for (let i = length; i > 0; i--) {
-      const index = i - 1
-      const item = this.#tasks[index]
-      const { conditionKeys, func, strict } = item
-      const accord = this.checkConditions(conditionKeys)
-
-      // 符合条件
-      if (accord) {
-        func() // 执行函数
-        // 非严格任务
-        if (strict === false) {
-          this.#tasks.splice(index, 1) // 移除函数记录
-        }
-      }
-    }
-  }
+  getTasks = () => this.#tasks
 }
