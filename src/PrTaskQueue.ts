@@ -182,6 +182,14 @@ export class PrTaskQueue<T extends string> {
 
     let timer = 0
 
+    // 清除函数
+    const clear = () => {
+      if (this.#options.debug) {
+        console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: task ${describe} (${key}) delete`)
+      }
+      this.#tasks.delete(key)
+    }
+
     // 创建执行函数
     const run = async () => {
       //  该任务已被删除 该任务正在执行 则跳过
@@ -210,9 +218,6 @@ export class PrTaskQueue<T extends string> {
         .finally(() => {
           // 非严格模式自动移除该任务
           if (task.strict === false) {
-            if (this.#options.debug) {
-              console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: task ${describe} (${key}) delete`)
-            }
             task.clear() // 移除任务
           }
           clearTimeout(timer) // 移除超时计时器
@@ -231,11 +236,6 @@ export class PrTaskQueue<T extends string> {
     const retry = () => {
       task.runing = false // 结束运行状态
       return run()
-    }
-
-    // 清除函数
-    const clear = () => {
-      this.#tasks.delete(key)
     }
 
     const task = { key, describe, strict, conditionKeys, runing: false, func, checkAccord, success, fail, complete, run, retry, clear }
