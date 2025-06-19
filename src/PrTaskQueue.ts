@@ -1,3 +1,10 @@
+interface Options {
+  /**
+   * 调试模式
+   */
+  debug?: boolean
+}
+
 interface Task<T> {
   /**
    * 任务唯一标识
@@ -17,6 +24,10 @@ interface Task<T> {
    * 任务执行条件 (当所有条件均为true时 该任务才执行)
    */
   conditionKeys: T[]
+  /**
+   * 是否正在运行
+   */
+  runing: boolean
   /**
    * 任务函数
    */
@@ -40,7 +51,15 @@ interface Task<T> {
   /**
    * 执行任务
    */
-  exe: () => Promise<void>
+  run: () => Promise<void>
+  /**
+   * 重试任务
+   */
+  retry: () => Promise<void>
+  /**
+   * 清除任务
+   */
+  clear: () => void
 }
 
 interface CreateTask<T> {
@@ -81,24 +100,27 @@ interface CreateTask<T> {
 }
 
 export class PrTaskQueue<T extends string> {
+  #options = {
+    debug: false
+  }
+
   #conditionMap = new Map<T, boolean>() // 条件
 
   #tasks = new Map<String, Task<T>>() // 任务队列
 
   #index = 0 // 任务 index 用于生成任务key
 
-  #executing_tasks = new Map<String, Task<T>>() // 正在执行的任务
-
   /**
    * 初始化条件
    * @example const taskQueue = new PrTaskQueue(['login','isAdmin'])
    * @param conditionKeys 条件keys string[]
    */
-  constructor(conditionKeys: T[]) {
+  constructor(conditionKeys: T[], _options: Options = {}) {
     // 设置所有条件为 true
     for (const conditionKey of conditionKeys) {
       this.#conditionMap.set(conditionKey, true)
     }
+    this.#options = { debug: false, ..._options }
   }
 
   /**
@@ -112,11 +134,12 @@ export class PrTaskQueue<T extends string> {
       throw new Error('You have set an incorrect condition. If this is necessary, you need to define it first during instantiation.')
     }
 
-    // console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->Breathe: setCondition:${conditionKey}`, accord)
+    const old_accord = this.#conditionMap.get(conditionKey)
 
     this.#conditionMap.set(conditionKey, accord)
-    // 每次条件变为true 都可能有以满足条件的任务 需要检查执行对应任务
-    if (accord) {
+
+    // 当条件由false变为true 需要检查可执行的任务
+    if (old_accord === false && accord) {
       await this.executeTasks()
     }
   }
@@ -132,9 +155,9 @@ export class PrTaskQueue<T extends string> {
       describe: '',
       strict: false,
       timeout: 0,
-      success: (_e: any) => {},
-      fail: (_e: any) => {},
-      complete: () => {},
+      success: async (_e: any) => {},
+      fail: async (_e: any) => {},
+      complete: async () => {},
       ...options
     }
 
@@ -160,17 +183,15 @@ export class PrTaskQueue<T extends string> {
     let timer = 0
 
     // 创建执行函数
-    const exe = async () => {
+    const run = async () => {
       //  该任务已被删除 该任务正在执行 则跳过
-      if (!this.#tasks.get(key) || this.#executing_tasks.get(key)) return
+      if (!this.#tasks.get(key) || task.runing) return
 
-      const isAccord = task.checkAccord() // 是否可以执行
+      task.runing = true
 
-      if (!isAccord) return // 不符合条件
-
-      // console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: exe ${describe}`)
-
-      this.#executing_tasks.set(key, task) // 记录当前正在执行的任务
+      if (this.#options.debug) {
+        console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: task ${describe} (${key}) run`)
+      }
 
       // 执行函数
       const task_promise = task.func()
@@ -185,30 +206,47 @@ export class PrTaskQueue<T extends string> {
       })
 
       // 使用 race 当超时后终止任务的进行
-      await Promise.race([task_promise, timeout_promise])
-        .then(async (e) => {
-          success(e)
-        })
-        .catch(async (e) => {
-          fail(e)
-        })
-        .finally(async () => {
-          this.#executing_tasks.delete(task.key) // 移除正在执行的状态
+      return Promise.race([task_promise, timeout_promise])
+        .finally(() => {
           // 非严格模式自动移除该任务
           if (task.strict === false) {
-            this.#tasks.delete(task.key) // 移除任务
+            if (this.#options.debug) {
+              console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: task ${describe} (${key}) delete`)
+            }
+            task.clear() // 移除任务
           }
           clearTimeout(timer) // 移除超时计时器
+          task.runing = false // 结束运行状态
           complete()
+        })
+        .then((e) => {
+          success(e)
+        })
+        .catch((e) => {
+          fail(e)
         })
     }
 
-    const task = { key, describe, strict, conditionKeys, func, checkAccord, success, fail, complete, exe }
+    // 创建重试函数
+    const retry = () => {
+      task.runing = false // 结束运行状态
+      return run()
+    }
+
+    // 清除函数
+    const clear = () => {
+      this.#tasks.delete(key)
+    }
+
+    const task = { key, describe, strict, conditionKeys, runing: false, func, checkAccord, success, fail, complete, run, retry, clear }
 
     this.#tasks.set(key, task) // 添加到队列
 
     // 尝试执行当前任务
-    await exe()
+    const isAccord = task.checkAccord() // 是否可以执行
+    if (isAccord) {
+      await task.run()
+    }
 
     return task
   }
@@ -219,7 +257,10 @@ export class PrTaskQueue<T extends string> {
   executeTasks = async () => {
     const tasks = [...this.#tasks.values()]
     for (const task of tasks) {
-      await task.exe() // 执行时自动判断是否符合条件
+      const isAccord = task.checkAccord() // 是否可以执行
+      if (isAccord) {
+        await task.run()
+      }
     }
   }
 
