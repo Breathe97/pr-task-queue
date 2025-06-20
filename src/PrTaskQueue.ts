@@ -245,7 +245,8 @@ export class PrTaskQueue<T extends string> {
     // 尝试执行当前任务
     const isAccord = task.checkAccord() // 是否可以执行
     if (isAccord) {
-      await task.run()
+      // 先返回 task 再执行
+      setTimeout(() => task.run(), 0)
     }
 
     return task
