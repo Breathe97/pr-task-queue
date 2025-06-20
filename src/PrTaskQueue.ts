@@ -259,7 +259,7 @@ export class PrTaskQueue<T extends string> {
     for (const task of tasks) {
       const isAccord = task.checkAccord() // 是否可以执行
       if (isAccord) {
-        await task.run()
+        task.run()
       }
     }
   }
