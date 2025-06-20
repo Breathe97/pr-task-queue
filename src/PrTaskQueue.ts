@@ -82,6 +82,10 @@ interface CreateTask<T> {
    */
   conditionKeys: T[]
   /**
+   * 任务执行时影响的条件 (执行该任务时相应的条件会被设置为false)
+   */
+  changeConditionKeys?: T[]
+  /**
    * 任务函数
    */
   func: () => Promise<unknown>
@@ -161,7 +165,7 @@ export class PrTaskQueue<T extends string> {
       ...options
     }
 
-    const { describe, strict, timeout, conditionKeys, func, success, fail, complete } = _options
+    const { describe, strict, timeout, conditionKeys, changeConditionKeys = [], func, success, fail, complete } = _options
 
     const key = `${this.#index++}` // 任务唯一key
 
@@ -185,7 +189,7 @@ export class PrTaskQueue<T extends string> {
     // 清除函数
     const clear = () => {
       if (this.#options.debug) {
-        console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: task ${describe} (${key}) delete`)
+        console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: task ${describe} (${key}) end`)
       }
       this.#tasks.delete(key)
     }
@@ -196,6 +200,11 @@ export class PrTaskQueue<T extends string> {
       if (!this.#tasks.get(key) || task.runing) return
 
       task.runing = true
+
+      // 将依赖条件设置false
+      for (const conditionKey of changeConditionKeys) {
+        this.setCondition(conditionKey, false)
+      }
 
       if (this.#options.debug) {
         console.log('\x1b[38;2;0;151;255m%c%s\x1b[0m', 'color:#0097ff;', `------->pr-task-queue: task ${describe} (${key}) run`)
